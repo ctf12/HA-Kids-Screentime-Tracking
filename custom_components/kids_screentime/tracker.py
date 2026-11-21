@@ -1,6 +1,7 @@
 """Turn Apple TV media_player state changes into play segments."""
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -31,7 +32,32 @@ ATTR_DURATION = "media_duration"
 ATTR_APP_ID = "app_id"
 ATTR_APP_NAME = "app_name"
 
+ATTR_ARTIST = "media_artist"
 VIDEO_TYPES = {"tvshow", "movie", "video"}
+
+# Apps rarely fill the series fields. What the live house actually sends (see docs/apple-tv-attributes.md):
+#   Disney+: media_title = the series, media_artist = "S1:E21 Milk"
+#   Crave:   media_title = "Friends \u2011 S1 E5 The One With ..." (a non-breaking hyphen)
+#   Netflix: nothing but the app
+_EPISODE_ARTIST = re.compile(r"^S(\d+)\s*[:.]?\s*E(\d+)\b", re.IGNORECASE)
+_EPISODE_TITLE = re.compile(r"^(?P<series>.+?)\s*[-\u2010-\u2015]\s*S(?P<s>\d+)\s*[:.]?\s*E(?P<e>\d+)\b", re.IGNORECASE)
+
+
+def episode_info(attrs: dict[str, Any]) -> tuple[str | None, int | None, int | None]:
+    """Series, season and episode: from the proper attributes when sent, else read out of the artist or the title."""
+    series, season, episode = attrs.get(ATTR_SERIES), attrs.get(ATTR_SEASON), attrs.get(ATTR_EPISODE)
+    if series is not None or season is not None or episode is not None:
+        return series, season, episode
+    title, artist = attrs.get(ATTR_TITLE), attrs.get(ATTR_ARTIST)
+    if isinstance(title, str) and isinstance(artist, str):
+        m = _EPISODE_ARTIST.match(artist.strip())
+        if m:
+            return title.strip(), int(m.group(1)), int(m.group(2))
+    if isinstance(title, str):
+        m = _EPISODE_TITLE.match(title.strip())
+        if m:
+            return m.group("series").strip(), int(m.group("s")), int(m.group("e"))
+    return None, None, None
 
 
 @dataclass
@@ -89,12 +115,12 @@ class SessionTracker:
         app_id, title = a.get(ATTR_APP_ID), a.get(ATTR_TITLE)
         if content_type is None and not (app_id or title):
             return None
-        series = a.get(ATTR_SERIES)
+        series, season, episode = episode_info(a)
         return _Open(
             device=state.entity_id,
-            item=(app_id, title, series, a.get(ATTR_SEASON), a.get(ATTR_EPISODE)),
+            item=(app_id, title, series, season, episode),
             start=dt_util.utcnow(), app_id=app_id, app_name=a.get(ATTR_APP_NAME), title=title,
-            series=series, season=a.get(ATTR_SEASON), episode=a.get(ATTR_EPISODE),
+            series=series, season=season, episode=episode,
             media_type=str(content_type or "video").lower(), duration_total=_number(a.get(ATTR_DURATION)),
         )
 

@@ -1,0 +1,7 @@
+{
+  "_note": "Real attributes read from the live house's recorder database on 20 Nov 2026 (media_player.*_apple_tv).",
+  "netflix_playing": {"state": "playing", "attributes": {"app_id": "com.netflix.Netflix", "app_name": "Netflix"}},
+  "disney_plus_playing": {"state": "playing", "attributes": {"app_id": "com.disney.disneyplus", "app_name": "Disney+", "media_title": "How I Met Your Mother", "media_artist": "S1:E21 Milk", "media_duration": 1350, "media_content_id": "3a8c64c8-c247-4b4a-b164-f3f23140f2d9"}},
+  "disney_plus_paused_no_title": {"state": "paused", "attributes": {"app_id": "com.disney.disneyplus", "app_name": "Disney+", "media_duration": 0}},
+  "crave_paused": {"state": "paused", "attributes": {"app_id": "ca.bellmedia.cravetv", "app_name": "Crave", "media_title": "Friends ‑ S1 E5 The One With the East German Laundry Detergent", "media_content_type": "video", "media_duration": 1359, "media_content_id": "c1730780"}}
+}

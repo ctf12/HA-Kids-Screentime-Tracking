@@ -221,3 +221,50 @@ async def test_apps_without_an_id_do_not_share_a_show_key(parts):
         await tracker.async_handle_state(TV, state("playing", **attrs), at(0))
         await tracker.async_handle_state(TV, state("paused", **attrs), at(300))
     assert {s.show_key for s in store.segments.values()} == {"app:disney junior", "app:hulu"}
+
+
+# Real attributes read from the live house's recorder database (20 Nov 2026).
+DISNEY = dict(app_id="com.disney.disneyplus", app_name="Disney+", media_title="How I Met Your Mother",
+              media_artist="S1:E21 Milk", media_duration=1350, media_content_id="3a8c64c8")
+CRAVE = dict(app_id="ca.bellmedia.cravetv", app_name="Crave", media_content_type="video", media_duration=1359,
+             media_title="Friends ‑ S1 E5 The One With the East German Laundry Detergent", media_content_id="c1730780")
+NETFLIX = dict(app_id="com.netflix.Netflix", app_name="Netflix")
+
+
+async def watched(parts, attrs, seconds_=300):
+    tracker, store = parts
+    await tracker.async_handle_state(TV, state("playing", **attrs), at(0))
+    await tracker.async_handle_state(TV, state("paused", **attrs), at(seconds_))
+    return next(iter(store.segments.values()))
+
+
+async def test_disney_plus_episode_is_read_from_the_artist_field(parts):
+    seg = await watched(parts, DISNEY)
+    assert (seg.series, seg.season, seg.episode, seg.show_key) == (
+        "How I Met Your Mother", 1, 21, "how i met your mother")
+
+
+async def test_crave_series_and_episode_are_read_from_the_title(parts):
+    seg = await watched(parts, CRAVE)
+    assert (seg.series, seg.season, seg.episode, seg.show_key) == ("Friends", 1, 5, "friends")
+
+
+async def test_next_episode_of_the_same_show_starts_a_new_segment_under_one_show(parts):
+    tracker, store = parts
+    ep1, ep2 = dict(DISNEY), dict(DISNEY, media_artist="S1:E22 Come On", media_content_id="x2")
+    await tracker.async_handle_state(TV, state("playing", **ep1), at(0))
+    await tracker.async_handle_state(TV, state("playing", **ep2), at(300))
+    await tracker.async_handle_state(TV, state("paused", **ep2), at(600))
+    assert sorted((s.episode, s.seconds) for s in store.segments.values()) == [(21, 300), (22, 300)]
+    assert {s.show_key for s in store.segments.values()} == {"how i met your mother"}
+
+
+async def test_a_movie_and_an_app_with_no_details_keep_working(parts):
+    movie = dict(DISNEY, media_title="Moana", media_artist="2016")
+    seg = await watched(parts, movie)
+    assert (seg.series, seg.season, seg.episode, seg.show_key) == (None, None, None, "moana")
+
+
+async def test_netflix_reports_only_the_app_so_it_is_tracked_at_app_level(parts):
+    seg = await watched(parts, NETFLIX)
+    assert seg.show_key == "app:com.netflix.netflix" and seg.series is None and seg.duration_total is None

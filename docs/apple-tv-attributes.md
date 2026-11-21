@@ -1,19 +1,20 @@
 # Apple TV attributes
 
-**Status: not yet verified against the real TVs.** The tracker uses HA's documented `apple_tv`
-`media_player` attributes. Confirm them before relying on per-show data.
+**Status: checked against the live house on 20 Nov 2026**, from the Home Assistant recorder
+database (real states of the three Apple TV media players). What each app sends differs a lot.
 
-| Attribute | Used for |
-|---|---|
-| `state` (`playing`, `paused`, `idle`, `standby`, `off`) | only `playing` counts |
-| `media_content_type` (`tvshow`, `movie`, `video`, `music`) | non-video types are ignored |
-| `media_title`, `media_series_title`, `media_season`, `media_episode` | show key and episode |
-| `media_position`, `media_position_updated_at`, `media_duration` | percent watched |
-| `app_id`, `app_name` | app breakdown, kids' apps, YouTube rule |
+| App | `media_title` | `media_artist` | other | What the tracker gets |
+|---|---|---|---|---|
+| Disney+ | the **series** ("How I Met Your Mother") | `S1:E21 Milk` (season, episode, episode name) | `media_duration`, `media_content_id`; no content type, no series/season/episode fields | series, season and episode, read from the artist |
+| Crave | `Friends ‑ S1 E5 The One With…` (series, season and episode all in one string; the dash is a non-breaking hyphen) | none | `media_content_type: video`, `media_duration` | series, season and episode, read from the title |
+| Netflix | **none** | none | only `app_id` and `app_name` | app only; tracked as `app:com.netflix.netflix` |
 
-## How to verify
+Netflix does not publish what is playing to tvOS, so neither pyatv nor Home Assistant can read a
+title, episode or length from it. This is the app's choice, not a fault in pyatv or the integration.
+Time in an app like that can only be tracked at app level, so a viewer cannot be told apart by content.
 
-Play a kids' episode and a movie in each app Helena uses, then in Developer tools → States open
-each Apple TV media player and note which of the attributes above are present, and which app
-reports no title or no series. If names differ, change the `ATTR_*` constants at the top of
-`custom_components/kids_screentime/tracker.py` and add a test with the real values.
+Also seen: `media_position` was not present in any sampled state, so "percent watched" stays empty
+until an app sends it. `state` values seen: `playing`, `paused`, `idle`, `unknown`, `off`, `unavailable`.
+
+The parsing lives in `episode_info()` in `custom_components/kids_screentime/tracker.py`; real
+samples are in `tests/fixtures/apple_tv_states.json` and the tests in `tests/test_tracker.py`.
