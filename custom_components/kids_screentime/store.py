@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
+from .classifier import app_matches
 from .models import Rules, Segment, Show, Verdict
 
 STORAGE_VERSION = 1
@@ -60,6 +61,21 @@ class ScreentimeStore:
         for sid in doomed:
             del self.segments[sid]
         return len(doomed)
+
+    def segment_verdict(self, segment: Segment) -> Verdict | None:
+        """What a segment counts as: its show's verdict, except that time in a kids' app always counts."""
+        show = self.shows.get(segment.show_key)
+        if show is None:
+            return None
+        if show.verdict == Verdict.REVIEW and app_matches(segment.app_name, self.rules.kids_apps):
+            return Verdict.COUNT
+        return show.verdict
+
+    def purge_show(self, key: str) -> None:
+        """Forget a show and its segments entirely (no user rule is left behind)."""
+        self._drop_segments(key)
+        self.shows.pop(key, None)
+        self.schedule_save()
 
     def delete_show(self, key: str) -> int:
         removed = self._drop_segments(key)

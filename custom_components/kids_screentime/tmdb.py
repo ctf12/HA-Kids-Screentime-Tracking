@@ -21,6 +21,7 @@ class Lookup:
     tmdb_id: int
     rating: str | None
     kids_genre: bool
+    exact: bool = True
 
 
 class TmdbClient:
@@ -57,7 +58,8 @@ class TmdbClient:
             return None
         wanted = show_key(title)
         name_field = "name" if media_type == "tv" else "title"
-        match = next((r for r in results if show_key(r.get(name_field, "")) == wanted), results[0])
+        exact_match = next((r for r in results if show_key(r.get(name_field, "")) == wanted), None)
+        match = exact_match or results[0]
         tmdb_id = match["id"]
         details = await self._get(f"{media_type}/{tmdb_id}")
         kids_genre = any(g.get("id") == KIDS_GENRE_ID for g in details.get("genres", []))
@@ -65,7 +67,7 @@ class TmdbClient:
             rating = self._tv_rating(await self._get(f"tv/{tmdb_id}/content_ratings"))
         else:
             rating = self._movie_rating(await self._get(f"movie/{tmdb_id}/release_dates"))
-        return Lookup(tmdb_id=tmdb_id, rating=rating, kids_genre=kids_genre)
+        return Lookup(tmdb_id=tmdb_id, rating=rating, kids_genre=kids_genre, exact=exact_match is not None)
 
     @staticmethod
     def _tv_rating(data: dict[str, Any]) -> str | None:

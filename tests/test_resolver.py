@@ -58,7 +58,7 @@ async def test_no_tmdb_key_uses_rules_and_app_only(store):
     resolver = ShowResolver(store, None)
     assert (await resolve(resolver, app="Netflix")).verdict == Verdict.REVIEW
     junior = await resolve(resolver, key="app:x", title="Disney Junior", app="Disney Junior")
-    assert junior.verdict == Verdict.COUNT
+    assert junior.verdict == Verdict.REVIEW  # kids' apps are decided per segment, not per show
 
 
 async def test_manual_never_beats_rating(store):
@@ -78,3 +78,30 @@ async def test_discarded_adult_title_leaves_no_trace(store):
     again = await resolve(resolver, key="gritty drama", title="Gritty Drama", app="Netflix")
     assert again.verdict == Verdict.DISCARD
     assert tmdb.calls == 1  # still cached, just not readable
+
+
+async def test_no_key_marks_titles_for_retry_and_a_later_key_resolves_them(store):
+    first = await resolve(ShowResolver(store, None), app="Netflix")
+    assert first.verdict == Verdict.REVIEW and first.lookup_failed
+    later = await resolve(ShowResolver(store, FakeTmdb()), app="Netflix")
+    assert later.verdict == Verdict.COUNT and not later.lookup_failed
+
+
+async def test_review_title_that_turns_adult_is_purged(store):
+    from datetime import timedelta
+
+    from custom_components.kids_screentime.models import Segment
+
+    flaky = FakeTmdb({"gritty drama": Lookup(9, "TV-MA", False)}, fail_times=1)
+    resolver = ShowResolver(store, flaky)
+    await resolve(resolver, key="gritty drama", title="Gritty Drama", app="Netflix")
+    store.add_segment(Segment("g1", "media_player.tv", None, "Netflix", "Gritty Drama", None, None, None, "tvshow",
+                              "gritty drama", NOW, NOW + timedelta(minutes=5), 300, None, None))
+    await resolve(resolver, key="gritty drama", title="Gritty Drama", app="Netflix")
+    assert "gritty drama" not in store.shows and not store.segments
+
+
+async def test_loose_match_never_discards(store):
+    loose = Lookup(7, "TV-14", False, exact=False)
+    shown = await resolve(ShowResolver(store, FakeTmdb({"bluey": loose})))
+    assert shown.verdict == Verdict.REVIEW and "bluey" in store.shows

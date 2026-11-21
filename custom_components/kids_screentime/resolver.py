@@ -13,6 +13,9 @@ from .tmdb import Lookup, TmdbClient, TmdbError
 
 
 class ShowResolver:
+    """App rules (ignored and kids' apps) are decided per segment by the tracker and the store,
+    so a show's verdict here depends only on the title, its rating and the user's lists."""
+
     def __init__(self, store: ScreentimeStore, tmdb: TmdbClient | None) -> None:
         self._store = store
         self._tmdb = tmdb
@@ -30,40 +33,54 @@ class ShowResolver:
                 rating=lookup.rating if lookup else None,
                 tmdb_id=lookup.tmdb_id if lookup else None,
                 kids_genre=lookup.kids_genre if lookup else False,
-                verdict=classify(key=key, app_name=app_name, rating=None, kids_genre=False, rules=self._store.rules),
-                source="auto", lookup_failed=failed,
+                verdict=Verdict.REVIEW, source="auto", lookup_failed=failed,
                 first_seen=show.first_seen if show else now, last_seen=now,
+                exact=lookup.exact if lookup else True,
             )
-        show.verdict = classify(
-            key=key, app_name=app_name, rating=show.rating,
-            kids_genre=show.kids_genre, rules=self._store.rules,
-        )
+        verdict = classify(
+            key=key, app_name=None, rating=show.rating, kids_genre=show.kids_genre, rules=self._store.rules)
+        if verdict == Verdict.DISCARD and not show.exact and key not in self._store.rules.never:
+            verdict = Verdict.REVIEW  # a loose title match must never silently discard
+        show.verdict = verdict
         show.last_seen = now
-        if show.verdict == Verdict.DISCARD and key not in self._store.rules.never and key not in self._store.shows:
-            return show  # adult viewing leaves no readable trace
+        if verdict == Verdict.DISCARD and key not in self._store.rules.never:
+            self._store.purge_show(key)  # adult viewing leaves no trace, even if it was in review before
+            return show
         self._store.upsert_show(show)
         return show
 
     async def _lookup(self, key: str, title: str, media_type: str) -> tuple[Lookup | None, bool]:
-        if self._tmdb is None or key.startswith("app:"):
+        if key.startswith("app:"):
             return None, False
+        if self._tmdb is None:
+            return None, True  # no key yet: retried once one is added
         kinds = {"tvshow": ["tv"], "movie": ["movie"]}.get(media_type, ["tv", "movie"])
+        loose: Lookup | None = None
         for kind in kinds:
-            cache_key = hashlib.sha256(f"{kind}:{key}".encode()).hexdigest()[:16]
-            if cache_key in self._store.lookups:
-                cached = self._store.lookups[cache_key]
-                if cached is not None:
-                    return Lookup(**cached), False
-                continue
-            try:
-                found = await self._tmdb.lookup(title, kind)  # type: ignore[arg-type]
-            except TmdbError:
+            found, failed = await self._lookup_kind(kind, key, title)
+            if failed:
                 return None, True
-            self._store.lookups[cache_key] = (
-                None if found is None
-                else {"tmdb_id": found.tmdb_id, "rating": found.rating, "kids_genre": found.kids_genre}
-            )
-            self._store.schedule_save()
-            if found is not None:
+            if found is None:
+                continue
+            if found.exact:
                 return found, False
-        return None, False
+            loose = loose or found
+        return loose, False
+
+    async def _lookup_kind(self, kind: str, key: str, title: str) -> tuple[Lookup | None, bool]:
+        cache_key = hashlib.sha256(f"{kind}:{key}".encode()).hexdigest()[:16]
+        if cache_key in self._store.lookups:
+            cached = self._store.lookups[cache_key]
+            return (Lookup(**cached) if cached is not None else None), False
+        try:
+            found = await self._tmdb.lookup(title, kind)  # type: ignore[union-attr,arg-type]
+        except TmdbError:
+            return None, True
+        self._store.lookups[cache_key] = (
+            None if found is None else {
+                "tmdb_id": found.tmdb_id, "rating": found.rating,
+                "kids_genre": found.kids_genre, "exact": found.exact,
+            }
+        )
+        self._store.schedule_save()
+        return found, False

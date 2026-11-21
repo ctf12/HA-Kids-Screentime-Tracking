@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -13,6 +13,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.util import dt as dt_util
 
+from .classifier import app_matches
 from .const import FLUSH_INTERVAL, MIN_SEGMENT_SECONDS, SIGNAL_UPDATED
 from .models import Segment, Verdict, show_key
 from .resolver import ShowResolver
@@ -45,6 +46,7 @@ class _Open:
     season: int | None
     episode: int | None
     media_type: str
+    segment_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     position_max: float | None = None
     duration_total: float | None = None
 
@@ -113,8 +115,10 @@ class SessionTracker:
         seconds = int((end - seg.start).total_seconds())
         if seconds < MIN_SEGMENT_SECONDS:
             return
+        if app_matches(seg.app_name, self._store.rules.ignored_apps):
+            return  # ignored apps (YouTube) are dropped before any lookup or show is created
         name = seg.series or seg.title
-        key = show_key(name) if name else show_key(f"app:{seg.app_id or 'unknown'}")
+        key = show_key(name) if name else show_key(f"app:{seg.app_id or seg.app_name or 'unknown'}")
         title = name or seg.app_name or "Unknown title"
         show = await self._resolver.resolve(
             key=key, title=title, media_type=seg.media_type, app_name=seg.app_name, now=end
@@ -122,7 +126,7 @@ class SessionTracker:
         if show.verdict == Verdict.DISCARD:
             return
         self._store.add_segment(Segment(
-            id=uuid.uuid4().hex, device=seg.device, app_id=seg.app_id, app_name=seg.app_name,
+            id=seg.segment_id, device=seg.device, app_id=seg.app_id, app_name=seg.app_name,
             title=seg.title or title, series=seg.series, season=seg.season, episode=seg.episode,
             media_type=seg.media_type, show_key=key, start=seg.start, end=end, seconds=seconds,
             position_max=seg.position_max, duration_total=seg.duration_total,
@@ -130,11 +134,11 @@ class SessionTracker:
         async_dispatcher_send(self._hass, SIGNAL_UPDATED)
 
     async def async_flush(self, now: datetime) -> None:
-        """Close every open segment and reopen it, so a crash loses at most one interval."""
+        """Save every open segment as it stands, so a crash loses at most one interval."""
         for entity_id, seg in list(self._open.items()):
-            done = replace(seg)
-            seg.start = now
-            await self._emit(done, now)
+            if self._open.get(entity_id) is not seg:
+                continue  # it closed while an earlier lookup was awaited; never emit it twice
+            await self._emit(seg, now)  # same row id each time: this updates the one in-progress record
 
     async def async_close_all(self, now: datetime) -> None:
         opened, self._open = list(self._open.values()), {}

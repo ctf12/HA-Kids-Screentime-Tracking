@@ -69,6 +69,7 @@ class Show:
     lookup_failed: bool
     first_seen: datetime
     last_seen: datetime
+    exact: bool = True  # False when TMDB only loosely matched the title
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

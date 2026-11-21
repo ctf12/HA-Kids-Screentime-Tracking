@@ -32,16 +32,14 @@ def week_start_date(day: date, week_start: int) -> date:
 
 def _counted(store: ScreentimeStore):
     for seg in store.segments.values():
-        show = store.shows.get(seg.show_key)
-        if show and show.verdict == Verdict.COUNT:
-            yield seg, show
+        if store.segment_verdict(seg) == Verdict.COUNT:
+            yield seg, store.shows[seg.show_key]
 
 
 def pending_minutes(store: ScreentimeStore) -> int:
     total = 0.0
     for seg in store.segments.values():
-        show = store.shows.get(seg.show_key)
-        if show and show.verdict == Verdict.REVIEW:
+        if store.segment_verdict(seg) == Verdict.REVIEW:
             total += (seg.end - seg.start).total_seconds()
     return _minutes(total)
 

@@ -90,3 +90,10 @@ async def test_apps_and_shows_breakdown_largest_first(store):
     assert s["apps"] == [{"app": "Disney+", "minutes": 60}, {"app": "PBS Kids", "minutes": 15}]
     assert [x["key"] for x in s["shows"]] == ["moana", "bluey", "pbs"]
     assert [x["percent"] for x in s["shows"]] == [100, 50, None]
+
+
+async def test_kids_app_segment_counts_even_when_show_is_in_review(store):
+    add(store, datetime(2026, 11, 20, 10, 0, tzinfo=UTC), 10, key="app:x", verdict=Verdict.REVIEW, app="Disney Junior")
+    add(store, datetime(2026, 11, 20, 11, 0, tzinfo=UTC), 10, key="app:x", verdict=Verdict.REVIEW, app="Netflix", seg_id="n")
+    s = summary(store)
+    assert s["today_minutes"] == 10 and s["pending_minutes"] == 10

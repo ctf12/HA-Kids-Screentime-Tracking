@@ -57,3 +57,12 @@ async def test_only_title_and_year_are_sent(client):
     await c.lookup("Moana", "movie", 2016)
     url = mock.mock_calls[0][1]
     assert dict(url.query) == {"api_key": "KEY", "query": "Moana", "year": "2016"}
+
+
+async def test_loose_match_is_flagged_not_exact(client):
+    c, mock = client
+    mock.get(f"{BASE}/search/tv", json={"results": [{"id": 5, "name": "Something Else"}]})
+    mock.get(f"{BASE}/tv/5/content_ratings", json={"results": [{"iso_3166_1": "US", "rating": "TV-14"}]})
+    mock.get(f"{BASE}/tv/5", json={"genres": []})
+    found = await c.lookup("Bluey", "tv")
+    assert found is not None and found.exact is False

@@ -98,7 +98,7 @@ def ws_sessions(hass: HomeAssistant, connection: ha_ws.ActiveConnection, msg: di
             "app": seg.app_name, "device": seg.device,
             "start": seg.start.isoformat(), "end": seg.end.isoformat(),
             "minutes": round(seg.seconds / 60),
-            "pending": bool(show and show.verdict == Verdict.REVIEW),
+            "pending": store.segment_verdict(seg) == Verdict.REVIEW,
         })
     connection.send_result(msg["id"], rows)
 

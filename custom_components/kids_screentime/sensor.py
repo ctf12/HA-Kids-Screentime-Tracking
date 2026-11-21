@@ -11,6 +11,7 @@ from homeassistant.const import UnitOfTime
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, SIGNAL_UPDATED
@@ -36,6 +37,12 @@ class _Base(SensorEntity):
             self.async_write_ha_state()
 
         self.async_on_remove(async_dispatcher_connect(self.hass, SIGNAL_UPDATED, _refresh))
+        # Today and this week roll over at local midnight even if nothing plays.
+        @callback
+        def _midnight(_now) -> None:
+            self.async_write_ha_state()
+
+        self.async_on_remove(async_track_time_change(self.hass, _midnight, hour=0, minute=0, second=5))
 
 
 class _Windowed(_Base):

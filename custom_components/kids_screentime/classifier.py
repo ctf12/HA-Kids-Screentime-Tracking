@@ -5,7 +5,7 @@ from .const import COUNT_RATINGS, DISCARD_RATINGS
 from .models import Rules, Verdict
 
 
-def _app_matches(app_name: str | None, names: set[str]) -> bool:
+def app_matches(app_name: str | None, names: set[str]) -> bool:
     if not app_name:
         return False
     folded = app_name.casefold()
@@ -20,9 +20,9 @@ def classify(
         return Verdict.DISCARD
     if key in rules.always:
         return Verdict.COUNT
-    if _app_matches(app_name, rules.ignored_apps):
+    if app_matches(app_name, rules.ignored_apps):
         return Verdict.DISCARD
-    if _app_matches(app_name, rules.kids_apps):
+    if app_matches(app_name, rules.kids_apps):
         return Verdict.COUNT
     if rating is not None:
         if rating in COUNT_RATINGS:

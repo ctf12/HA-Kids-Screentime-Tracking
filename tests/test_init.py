@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.kids_screentime.const import CONF_PLAYERS, CONF_TMDB_KEY, CONF_WEEK_START, DOMAIN, SIGNAL_UPDATED
 from custom_components.kids_screentime.models import Segment, Show, Verdict
@@ -49,3 +49,25 @@ async def test_sensor_state_follows_store(hass, freezer):
     async_dispatcher_send(hass, SIGNAL_UPDATED)
     await hass.async_block_till_done()
     assert hass.states.get("sensor.kids_screentime_today").state == "20"
+
+
+async def test_today_sensor_rolls_over_at_midnight(hass, freezer):
+    freezer.move_to("2026-11-20 12:00:00+00:00")
+    await hass.config.async_set_time_zone("UTC")
+    e = entry()
+    e.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(e.entry_id)
+    store = e.runtime_data.store
+    start = datetime(2026, 11, 20, 11, 0, tzinfo=timezone.utc)
+    store.upsert_show(Show("bluey", "Bluey", "TV-Y", 1, True, Verdict.COUNT, "auto", False, start, start))
+    store.add_segment(Segment(
+        id="s", device="media_player.tv", app_id=None, app_name="Disney+", title="Bluey", series="Bluey",
+        season=None, episode=None, media_type="tvshow", show_key="bluey", start=start,
+        end=start + timedelta(minutes=20), seconds=1200, position_max=None, duration_total=None))
+    async_dispatcher_send(hass, SIGNAL_UPDATED)
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.kids_screentime_today").state == "20"
+    freezer.move_to("2026-11-21 00:00:10+00:00")
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.kids_screentime_today").state == "0"

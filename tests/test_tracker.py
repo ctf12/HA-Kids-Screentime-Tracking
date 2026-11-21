@@ -6,6 +6,7 @@ from homeassistant.core import State
 from custom_components.kids_screentime.models import Verdict
 from custom_components.kids_screentime.resolver import ShowResolver
 from custom_components.kids_screentime.store import ScreentimeStore
+from custom_components.kids_screentime.summary import build_summary
 from custom_components.kids_screentime.tmdb import Lookup
 from custom_components.kids_screentime.tracker import SessionTracker
 
@@ -105,14 +106,15 @@ async def test_unavailable_state_closes_segment(parts):
     assert seconds(store) == [100]
 
 
-async def test_flush_splits_without_losing_or_doubling_time(parts):
+async def test_flush_keeps_one_row_without_losing_or_doubling_time(parts):
     tracker, store = parts
     await tracker.async_handle_state(TV, state("playing", **bluey()), at(0))
     await tracker.async_flush(at(300))
+    assert seconds(store) == [300]
     await tracker.async_flush(at(600))
     await tracker.async_handle_state(TV, state("paused", **bluey()), at(720))
-    assert seconds(store) == [120, 300, 300]
-    assert sum(seconds(store)) == 720
+    assert seconds(store) == [720]
+    assert len(store.segments) == 1
 
 
 async def test_no_title_kids_app_counts_under_app_key(parts):
@@ -122,7 +124,7 @@ async def test_no_title_kids_app_counts_under_app_key(parts):
     await tracker.async_handle_state(TV, state("paused", **junior), at(300))
     seg = next(iter(store.segments.values()))
     assert seg.show_key == "app:com.disney.junior"
-    assert store.shows[seg.show_key].verdict == Verdict.COUNT
+    assert build_summary(store, timezone.utc, at(400), 14, 1, 6)["today_minutes"] == 5
 
 
 async def test_no_title_other_app_goes_to_review(parts):
@@ -148,3 +150,74 @@ async def test_deleted_show_stays_blocked_on_next_play(parts):
     await tracker.async_handle_state(TV, state("playing", **bluey()), at(0))
     await tracker.async_handle_state(TV, state("paused", **bluey()), at(300))
     assert not store.segments
+
+
+class GateResolver:
+    """Holds one title's lookup open, the way a slow TMDB answer would."""
+
+    def __init__(self, inner, slow_key, gate):
+        self.inner, self.slow_key, self.gate = inner, slow_key, gate
+
+    async def resolve(self, **kw):
+        if kw["key"] == self.slow_key:
+            await self.gate.wait()
+        return await self.inner.resolve(**kw)
+
+
+async def test_flush_does_not_double_count_a_tv_that_pauses_during_a_slow_lookup(hass):
+    import asyncio
+
+    store = ScreentimeStore(hass)
+    await store.async_load()
+    gate = asyncio.Event()
+    tracker = SessionTracker(hass, store, GateResolver(ShowResolver(store, FakeTmdb()), "bluey", gate), [TV, "media_player.den_apple_tv"])
+    peppa = dict(bluey(), media_series_title="Peppa Pig", media_title="Mud")
+    den = State("media_player.den_apple_tv", "playing", peppa)
+    await tracker.async_handle_state(TV, state("playing", **bluey()), at(0))
+    await tracker.async_handle_state("media_player.den_apple_tv", den, at(0))
+    flush = asyncio.create_task(tracker.async_flush(at(300)))
+    await asyncio.sleep(0)
+    await tracker.async_handle_state("media_player.den_apple_tv", State("media_player.den_apple_tv", "paused", peppa), at(330))
+    gate.set()
+    await flush
+    assert [s.seconds for s in store.segments.values() if s.show_key == "peppa pig"] == [330]
+
+
+class CountingTmdb(FakeTmdb):
+    calls = 0
+
+    async def lookup(self, title, media_type, year=None):
+        type(self).calls += 1
+        return await super().lookup(title, media_type, year)
+
+
+async def test_ignored_app_is_dropped_before_any_lookup_or_show(hass):
+    store = ScreentimeStore(hass)
+    await store.async_load()
+    tmdb = CountingTmdb()
+    CountingTmdb.calls = 0
+    tracker = SessionTracker(hass, store, ShowResolver(store, tmdb), [TV])
+    yt = dict(bluey(), app_id="com.google.ios.youtube", app_name="YouTube")
+    await tracker.async_handle_state(TV, state("playing", **yt), at(0))
+    await tracker.async_handle_state(TV, state("paused", **yt), at(300))
+    assert CountingTmdb.calls == 0 and not store.shows and not store.segments
+
+
+async def test_same_title_in_youtube_does_not_change_earlier_totals(parts):
+    tracker, store = parts
+    await tracker.async_handle_state(TV, state("playing", **bluey()), at(0))
+    await tracker.async_handle_state(TV, state("paused", **bluey()), at(300))
+    yt = dict(bluey(), app_id="com.google.ios.youtube", app_name="YouTube")
+    await tracker.async_handle_state(TV, state("playing", **yt), at(400))
+    await tracker.async_handle_state(TV, state("paused", **yt), at(700))
+    assert store.shows["bluey"].verdict == Verdict.COUNT
+    assert build_summary(store, timezone.utc, at(800), 14, 1, 6)["today_minutes"] == 5
+
+
+async def test_apps_without_an_id_do_not_share_a_show_key(parts):
+    tracker, store = parts
+    for name in ("Disney Junior", "Hulu"):
+        attrs = dict(media_content_type="video", app_name=name)
+        await tracker.async_handle_state(TV, state("playing", **attrs), at(0))
+        await tracker.async_handle_state(TV, state("paused", **attrs), at(300))
+    assert {s.show_key for s in store.segments.values()} == {"app:disney junior", "app:hulu"}
