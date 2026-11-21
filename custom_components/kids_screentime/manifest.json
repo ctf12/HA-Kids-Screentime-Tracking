@@ -1,0 +1,13 @@
+{
+  "domain": "kids_screentime",
+  "name": "Kids Screentime Tracking",
+  "codeowners": ["@ctf12"],
+  "config_flow": true,
+  "dependencies": ["http", "websocket_api", "frontend", "panel_custom"],
+  "documentation": "https://github.com/ctf12/HA-Kids-Screentime-Tracking",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/ctf12/HA-Kids-Screentime-Tracking/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}
