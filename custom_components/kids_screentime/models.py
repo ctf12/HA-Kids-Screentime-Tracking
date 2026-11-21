@@ -88,15 +88,38 @@ class Show:
 
 
 @dataclass
+class QuietWindow:
+    """Hours to disregard: on these weekdays (0 = Monday), between start and end (local "HH:MM"), for these apps.
+
+    No apps means every app. An end at or before the start runs past midnight and belongs to the day it starts."""
+
+    id: str
+    apps: list[str]
+    days: list[int]
+    start: str
+    end: str
+    label: str = ""
+
+
+@dataclass
 class Rules:
     always: set[str] = field(default_factory=set)
     never: set[str] = field(default_factory=set)
     kids_apps: set[str] = field(default_factory=lambda: set(DEFAULT_KIDS_APPS))
     ignored_apps: set[str] = field(default_factory=lambda: {"youtube"})
+    quiet_windows: list[QuietWindow] = field(default_factory=list)
 
-    def to_dict(self) -> dict[str, list[str]]:
-        return {f.name: sorted(getattr(self, f.name)) for f in fields(self)}
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "always": sorted(self.always),
+            "never": sorted(self.never),
+            "kids_apps": sorted(self.kids_apps),
+            "ignored_apps": sorted(self.ignored_apps),
+            "quiet_windows": [asdict(w) for w in self.quiet_windows],
+        }
 
     @classmethod
-    def from_dict(cls, data: dict[str, list[str]]) -> Rules:
-        return cls(**{k: set(v) for k, v in data.items()})
+    def from_dict(cls, data: dict[str, Any]) -> Rules:
+        sets = {k: set(v) for k, v in data.items() if k in ("always", "never", "kids_apps", "ignored_apps")}
+        windows = [QuietWindow(**w) for w in data.get("quiet_windows", [])]
+        return cls(**sets, quiet_windows=windows)

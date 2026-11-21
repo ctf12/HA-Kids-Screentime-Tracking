@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import Any
 
+from .filters import kept_intervals
 from .models import Segment, Verdict
 from .store import ScreentimeStore
 
@@ -13,17 +14,17 @@ def _minutes(seconds: float) -> int:
     return round(seconds / 60)
 
 
-def split_by_day(seg: Segment, tz: tzinfo) -> dict[date, float]:
-    """Seconds of a segment that fall on each local calendar day (arithmetic in UTC, so DST can't skew it)."""
-    start, end = seg.start.astimezone(timezone.utc), seg.end.astimezone(timezone.utc)
+def split_by_day(seg: Segment, tz: tzinfo, windows: list | None = None) -> dict[date, float]:
+    """Seconds of a segment that count on each local calendar day, after quiet windows (arithmetic in UTC, DST-safe)."""
     out: dict[date, float] = {}
-    cursor = start
-    while cursor < end:
-        local = cursor.astimezone(tz)
-        next_midnight = datetime.combine(local.date() + timedelta(days=1), time.min, tzinfo=tz).astimezone(timezone.utc)
-        stop = min(end, next_midnight)
-        out[local.date()] = out.get(local.date(), 0.0) + (stop - cursor).total_seconds()
-        cursor = stop
+    for start, end in kept_intervals(seg.start, seg.end, seg.app_name, windows or [], tz):
+        cursor = start
+        while cursor < end:
+            local = cursor.astimezone(tz)
+            next_midnight = datetime.combine(local.date() + timedelta(days=1), time.min, tzinfo=tz).astimezone(timezone.utc)
+            stop = min(end, next_midnight)
+            out[local.date()] = out.get(local.date(), 0.0) + (stop - cursor).total_seconds()
+            cursor = stop
     return out
 
 
@@ -37,12 +38,17 @@ def _counted(store: ScreentimeStore):
             yield seg, store.shows[seg.show_key]
 
 
-def pending_minutes(store: ScreentimeStore) -> int:
+def pending_minutes(store: ScreentimeStore, tz: tzinfo = timezone.utc) -> int:
     total = 0.0
     for seg in store.segments.values():
         if store.segment_verdict(seg) == Verdict.REVIEW:
-            total += (seg.end - seg.start).total_seconds()
+            total += sum(split_by_day(seg, tz, store.rules.quiet_windows).values())
     return _minutes(total)
+
+
+def counted_seconds(store: ScreentimeStore, seg: Segment, tz: tzinfo) -> float:
+    """How much of a recorded segment counts once quiet windows are removed."""
+    return sum(split_by_day(seg, tz, store.rules.quiet_windows).values())
 
 
 def breakdown(
@@ -52,7 +58,7 @@ def breakdown(
     apps: dict[str, float] = defaultdict(float)
     shows: dict[str, float] = defaultdict(float)
     for seg, show in _counted(store):
-        seconds = sum(s for d, s in split_by_day(seg, tz).items() if first <= d <= last)
+        seconds = sum(s for d, s in split_by_day(seg, tz, store.rules.quiet_windows).items() if first <= d <= last)
         if seconds:
             apps[seg.app_name or "Unknown app"] += seconds
             shows[show.title] += seconds
@@ -65,7 +71,7 @@ def build_summary(
     today = now.astimezone(tz).date()
     day_seconds: dict[date, float] = defaultdict(float)
     for seg, _show in _counted(store):
-        for d, s in split_by_day(seg, tz).items():
+        for d, s in split_by_day(seg, tz, store.rules.quiet_windows).items():
             day_seconds[d] += s
 
     first_day = today - timedelta(days=days - 1)
@@ -76,7 +82,7 @@ def build_summary(
     apps: dict[str, float] = defaultdict(float)
     shows: dict[str, dict[str, Any]] = {}
     for seg, show in _counted(store):
-        in_window = sum(s for d, s in split_by_day(seg, tz).items() if first_day <= d <= today)
+        in_window = sum(s for d, s in split_by_day(seg, tz, store.rules.quiet_windows).items() if first_day <= d <= today)
         entry = shows.setdefault(show.key, {"title": show.title, "seconds": 0.0, "percent": None})
         if seg.position_max is not None and seg.duration_total:
             pct = round(100 * min(1.0, seg.position_max / seg.duration_total))
@@ -87,7 +93,7 @@ def build_summary(
 
     return {
         "today_minutes": _minutes(day_seconds.get(today, 0.0)),
-        "pending_minutes": pending_minutes(store),
+        "pending_minutes": pending_minutes(store, tz),
         "week_start": week_start,
         "days": [{"date": d.isoformat(), "minutes": _minutes(day_seconds.get(d, 0.0))} for d in day_list],
         "weeks": [

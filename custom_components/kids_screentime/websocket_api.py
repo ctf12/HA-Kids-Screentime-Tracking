@@ -1,6 +1,8 @@
 """Websocket commands and services for the panel and the HaCasa2 dashboard."""
 from __future__ import annotations
 
+import uuid
+from dataclasses import asdict
 from typing import Any
 
 import voluptuous as vol
@@ -12,9 +14,10 @@ from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, SIGNAL_UPDATED
-from .models import Verdict
+from .filters import validate_window
+from .models import QuietWindow, Verdict
 from .runtime import RuntimeData
-from .summary import build_summary
+from .summary import build_summary, counted_seconds
 
 RULE = vol.Any(None, "always", "never")
 
@@ -82,7 +85,8 @@ def ws_summary(hass: HomeAssistant, connection: ha_ws.ActiveConnection, msg: dic
 @ha_ws.require_admin
 @callback
 def ws_sessions(hass: HomeAssistant, connection: ha_ws.ActiveConnection, msg: dict[str, Any]) -> None:
-    store = _runtime(hass).store
+    data = _runtime(hass)
+    store = data.store
     segments = sorted(store.segments.values(), key=lambda s: s.start, reverse=True)
     if msg.get("before"):
         cutoff = dt_util.parse_datetime(msg["before"])
@@ -99,6 +103,7 @@ def ws_sessions(hass: HomeAssistant, connection: ha_ws.ActiveConnection, msg: di
             "app": seg.app_name, "device": seg.device,
             "start": seg.start.isoformat(), "end": seg.end.isoformat(),
             "minutes": round(seg.seconds / 60),
+            "counted_minutes": round(counted_seconds(store, seg, data.tz) / 60),
             "pending": store.segment_verdict(seg) == Verdict.REVIEW,
         })
     connection.send_result(msg["id"], rows)
@@ -161,10 +166,53 @@ def ws_resolve_review(hass: HomeAssistant, connection: ha_ws.ActiveConnection, m
     connection.send_result(msg["id"])
 
 
+@ha_ws.websocket_command({vol.Required("type"): "kids_screentime/quiet_windows"})
+@ha_ws.require_admin
+@callback
+def ws_quiet_windows(hass: HomeAssistant, connection: ha_ws.ActiveConnection, msg: dict[str, Any]) -> None:
+    connection.send_result(msg["id"], [asdict(w) for w in _runtime(hass).store.rules.quiet_windows])
+
+
+@ha_ws.websocket_command({
+    vol.Required("type"): "kids_screentime/add_quiet_window",
+    vol.Required("apps"): [str],
+    vol.Required("days"): [int],
+    vol.Required("start"): str,
+    vol.Required("end"): str,
+    vol.Optional("label", default=""): str,
+})
+@ha_ws.require_admin
+@callback
+def ws_add_quiet_window(hass: HomeAssistant, connection: ha_ws.ActiveConnection, msg: dict[str, Any]) -> None:
+    try:
+        validate_window(msg["days"], msg["start"], msg["end"])
+    except ValueError as err:
+        connection.send_error(msg["id"], "invalid_format", str(err))
+        return
+    window = QuietWindow(
+        id=uuid.uuid4().hex, apps=msg["apps"], days=sorted(set(msg["days"])),
+        start=msg["start"], end=msg["end"], label=msg["label"])
+    _runtime(hass).store.add_quiet_window(window)
+    _changed(hass)
+    connection.send_result(msg["id"], {"id": window.id})
+
+
+@ha_ws.websocket_command({vol.Required("type"): "kids_screentime/delete_quiet_window", vol.Required("window_id"): str})
+@ha_ws.require_admin
+@callback
+def ws_delete_quiet_window(hass: HomeAssistant, connection: ha_ws.ActiveConnection, msg: dict[str, Any]) -> None:
+    if not _runtime(hass).store.delete_quiet_window(msg["window_id"]):
+        connection.send_error(msg["id"], "not_found", "No such filter")
+        return
+    _changed(hass)
+    connection.send_result(msg["id"])
+
+
 def async_register(hass: HomeAssistant) -> None:
     for handler in (
         ws_summary, ws_sessions, ws_shows, ws_review, ws_delete_session,
         ws_delete_show, ws_set_rule, ws_resolve_review,
+        ws_quiet_windows, ws_add_quiet_window, ws_delete_quiet_window,
     ):
         ha_ws.async_register_command(hass, handler)
 

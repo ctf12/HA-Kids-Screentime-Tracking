@@ -98,9 +98,13 @@ class PendingSensor(_Base):
     _key = "pending_review"
     _attr_name = "Pending review"
 
+    def __init__(self, store: ScreentimeStore, entry_id: str, tz: tzinfo | None = None) -> None:
+        super().__init__(store, entry_id)
+        self._tz = tz
+
     @property
     def native_value(self) -> int:
-        return pending_minutes(self._store)
+        return pending_minutes(self._store, self._tz) if self._tz else pending_minutes(self._store)
 
 
 async def async_setup_entry(
@@ -110,5 +114,5 @@ async def async_setup_entry(
     async_add_entities([
         TodaySensor(data.store, entry.entry_id, data.tz, data.week_start),
         WeekSensor(data.store, entry.entry_id, data.tz, data.week_start),
-        PendingSensor(data.store, entry.entry_id),
+        PendingSensor(data.store, entry.entry_id, data.tz),
     ])

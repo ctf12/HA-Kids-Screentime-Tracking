@@ -97,3 +97,21 @@ async def test_kids_app_segment_counts_even_when_show_is_in_review(store):
     add(store, datetime(2026, 11, 20, 11, 0, tzinfo=UTC), 10, key="app:x", verdict=Verdict.REVIEW, app="Netflix", seg_id="n")
     s = summary(store)
     assert s["today_minutes"] == 10 and s["pending_minutes"] == 10
+
+
+async def test_quiet_window_removes_minutes_from_totals_but_not_the_log(store):
+    from custom_components.kids_screentime.models import QuietWindow
+
+    store.rules.quiet_windows.append(QuietWindow("w", ["disney+"], [4], "10:30", "12:00"))  # Fridays, 10:30-12:00
+    add(store, datetime(2026, 11, 20, 10, 0, tzinfo=UTC), 60)  # Fri 10:00-11:00: 30 min fall in the window
+    s = summary(store)
+    assert s["today_minutes"] == 30 and len(store.segments) == 1
+    assert s["apps"] == [{"app": "Disney+", "minutes": 30}]
+
+
+async def test_quiet_window_applies_to_pending_minutes_too(store):
+    from custom_components.kids_screentime.models import QuietWindow
+
+    store.rules.quiet_windows.append(QuietWindow("w", [], [4], "10:00", "11:00"))
+    add(store, datetime(2026, 11, 20, 10, 0, tzinfo=UTC), 10, key="mystery", verdict=Verdict.REVIEW)
+    assert summary(store)["pending_minutes"] == 0

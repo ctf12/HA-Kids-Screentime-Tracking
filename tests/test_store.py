@@ -73,3 +73,16 @@ async def test_resolve_review_count_true_sets_always(store):
 
 async def test_delete_segment_unknown_returns_false(store):
     assert store.delete_segment("nope") is False
+
+
+async def test_quiet_windows_persist_and_delete(hass, store):
+    from custom_components.kids_screentime.models import QuietWindow
+
+    store.add_quiet_window(QuietWindow("w1", ["netflix"], [2], "21:00", "23:00", "Wed night"))
+    await store.async_save()
+    again = ScreentimeStore(hass)
+    await again.async_load()
+    assert again.rules.quiet_windows == [QuietWindow("w1", ["netflix"], [2], "21:00", "23:00", "Wed night")]
+    assert again.delete_quiet_window("w1") is True
+    assert again.delete_quiet_window("w1") is False
+    assert again.rules.quiet_windows == []

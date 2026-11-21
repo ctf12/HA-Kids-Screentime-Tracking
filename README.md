@@ -38,6 +38,20 @@ This product uses the TMDB API but is not endorsed or certified by TMDB.
    `NC-17` → discarded; anything else (including `TV-PG`) → Needs review.
 5. No rating: TMDB genre *Kids* → counted; otherwise Needs review.
 
+## Filters (quiet times)
+
+On the panel's **Filters** tab you can disregard certain hours and days, for one app or all of them,
+for example Netflix on Wednesdays from 21:00 to 23:00. Time inside a filter is still logged (the Log
+shows "not counted" or "N of M min counted") but does not count toward the totals, the sensors or the
+dashboard. Times are Home Assistant's local time; a window that ends before it starts runs past midnight
+and belongs to the day it starts. This is the way to handle apps like Netflix that never say what is playing.
+
+## Continuous viewing
+
+A gap of up to 30 seconds in the same app and show (a short pause, an autoplay to the next episode, or
+the Apple TV briefly reporting another app) is one viewing, on one row in the Log. The row shows the
+latest episode. A longer break starts a new row.
+
 Design calls worth knowing: segments shorter than 15 seconds are dropped; if two TVs play kids'
 content at once, both count; the open session is saved every 5 minutes so a crash loses at most that.
 

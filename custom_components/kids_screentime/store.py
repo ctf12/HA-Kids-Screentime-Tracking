@@ -8,7 +8,7 @@ from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
 from .classifier import app_matches
-from .models import Rules, Segment, Show, Verdict
+from .models import QuietWindow, Rules, Segment, Show, Verdict
 
 STORAGE_VERSION = 1
 SAVE_DELAY = 10
@@ -107,6 +107,18 @@ class ScreentimeStore:
                 show.verdict = Verdict.DISCARD
                 show.source = "manual"
         self.schedule_save()
+
+    def add_quiet_window(self, window: QuietWindow) -> None:
+        self.rules.quiet_windows.append(window)
+        self.schedule_save()
+
+    def delete_quiet_window(self, window_id: str) -> bool:
+        kept = [w for w in self.rules.quiet_windows if w.id != window_id]
+        if len(kept) == len(self.rules.quiet_windows):
+            return False
+        self.rules.quiet_windows = kept
+        self.schedule_save()
+        return True
 
     def upsert_show(self, show: Show) -> None:
         self.shows[show.key] = show

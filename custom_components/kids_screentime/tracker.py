@@ -15,7 +15,7 @@ from homeassistant.helpers.event import async_track_state_change_event, async_tr
 from homeassistant.util import dt as dt_util
 
 from .classifier import app_matches
-from .const import FLUSH_INTERVAL, MIN_SEGMENT_SECONDS, SIGNAL_UPDATED
+from .const import FLUSH_INTERVAL, MIN_SEGMENT_SECONDS, SIGNAL_UPDATED, STITCH_GAP_SECONDS
 from .models import Segment, Verdict, show_key
 from .resolver import ShowResolver
 from .store import ScreentimeStore
@@ -84,6 +84,22 @@ def _number(value: Any) -> float | None:
         return None
 
 
+def _show_key_of(seg: "_Open") -> str:
+    name = seg.series or seg.title
+    return show_key(name) if name else show_key(f"app:{seg.app_id or seg.app_name or 'unknown'}")
+
+
+@dataclass
+class _Recent:
+    """The viewing that just ended on one TV, so a resume within the gap can carry on the same row."""
+
+    segment_id: str
+    start: datetime
+    end: datetime
+    app_id: str | None
+    key: str
+
+
 def _estimate_position(attrs: dict[str, Any], now: datetime) -> float | None:
     position = _number(attrs.get(ATTR_POSITION))
     if position is None:
@@ -103,6 +119,8 @@ class SessionTracker:
         self._resolver = resolver
         self._players = players
         self._open: dict[str, _Open] = {}
+        self._recent: dict[str, _Recent] = {}
+        self._pending: set[str] = set()  # rows closed whose save is still awaiting a lookup
 
     @staticmethod
     def _item(state: State | None) -> _Open | None:
@@ -130,10 +148,13 @@ class SessionTracker:
         closing: _Open | None = None
         if current is not None and (candidate is None or candidate.item != current.item):
             closing = self._open.pop(entity_id)
+            self._recent[entity_id] = _Recent(closing.segment_id, closing.start, now, closing.app_id, _show_key_of(closing))
+            self._pending.add(closing.segment_id)
             current = None
         if candidate is not None:
             if current is None:
                 candidate.start = now
+                self._stitch(entity_id, candidate, now)
                 self._open[entity_id] = current = candidate
             assert new is not None
             position = _estimate_position(new.attributes, now)
@@ -145,14 +166,31 @@ class SessionTracker:
         if closing is not None:
             await self._emit(closing, now)
 
+    def _stitch(self, entity_id: str, candidate: _Open, now: datetime) -> None:
+        """Carry on the previous row when the same app and show resumes within the gap (same id, original start)."""
+        recent = self._recent.get(entity_id)
+        if recent is None or (now - recent.end).total_seconds() > STITCH_GAP_SECONDS:
+            return
+        still_there = recent.segment_id in self._store.segments or recent.segment_id in self._pending
+        if still_there and recent.app_id == candidate.app_id and recent.key == _show_key_of(candidate):
+            candidate.segment_id = recent.segment_id
+            candidate.start = recent.start
+            del self._recent[entity_id]
+
     async def _emit(self, seg: _Open, end: datetime) -> None:
+        try:
+            await self._emit_row(seg, end)
+        finally:
+            self._pending.discard(seg.segment_id)
+
+    async def _emit_row(self, seg: _Open, end: datetime) -> None:
         seconds = int((end - seg.start).total_seconds())
         if seconds < MIN_SEGMENT_SECONDS:
             return
         if app_matches(seg.app_name, self._store.rules.ignored_apps):
             return  # ignored apps (YouTube) are dropped before any lookup or show is created
         name = seg.series or seg.title
-        key = show_key(name) if name else show_key(f"app:{seg.app_id or seg.app_name or 'unknown'}")
+        key = _show_key_of(seg)
         title = name or seg.app_name or "Unknown title"
         show = await self._resolver.resolve(
             key=key, title=title, media_type=seg.media_type, app_name=seg.app_name, now=end

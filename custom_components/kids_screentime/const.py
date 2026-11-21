@@ -9,6 +9,8 @@ CONF_WEEK_START = "week_start"  # Python weekday, 6 = Sunday
 
 DEFAULT_WEEK_START = 6
 MIN_SEGMENT_SECONDS = 15
+# A break this short (a pause, an autoplay, the Apple TV briefly reporting another app) is the same viewing.
+STITCH_GAP_SECONDS = 30
 FLUSH_INTERVAL = timedelta(minutes=5)
 
 COUNT_RATINGS = frozenset({"TV-Y", "TV-Y7", "TV-Y7-FV", "TV-G", "G", "PG"})

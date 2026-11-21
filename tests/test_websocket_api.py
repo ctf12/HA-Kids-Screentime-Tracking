@@ -114,3 +114,30 @@ async def test_delete_session_service(hass, store):
 async def test_set_show_rule_service(hass, store):
     await hass.services.async_call(DOMAIN, "set_show_rule", {"key": "bluey", "rule": "never"}, blocking=True)
     assert "bluey" in store.rules.never
+
+
+async def test_add_list_and_delete_a_quiet_window(ws, store):
+    added = await call(ws, "add_quiet_window", apps=["Netflix"], days=[2], start="21:00", end="23:00", label="Wed night")
+    assert added["success"]
+    window_id = added["result"]["id"]
+    listed = (await call(ws, "quiet_windows"))["result"]
+    assert listed == [{"id": window_id, "apps": ["Netflix"], "days": [2], "start": "21:00", "end": "23:00", "label": "Wed night"}]
+    assert (await call(ws, "delete_quiet_window", window_id=window_id))["success"]
+    assert (await call(ws, "quiet_windows"))["result"] == []
+    assert (await call(ws, "delete_quiet_window", window_id=window_id))["error"]["code"] == "not_found"
+
+
+async def test_a_bad_quiet_window_is_refused(ws):
+    msg = await call(ws, "add_quiet_window", apps=[], days=[], start="21:00", end="23:00")
+    assert not msg["success"] and msg["error"]["code"] == "invalid_format"
+
+
+async def test_sessions_show_how_much_counted_after_filters(ws, store):
+    from custom_components.kids_screentime.models import QuietWindow
+
+    store.rules.quiet_windows.append(QuietWindow("w", [], list(range(7)), "10:00", "10:05"))  # every day, 10:00-10:05
+    rows = (await call(ws, "sessions", limit=10))["result"]
+    a = next(r for r in rows if r["id"] == "a")  # 10:00-10:10 -> 5 of 10 minutes count
+    assert (a["minutes"], a["counted_minutes"]) == (10, 5)
+    b = next(r for r in rows if r["id"] == "b")  # 11:00, unaffected
+    assert b["counted_minutes"] == b["minutes"]

@@ -67,13 +67,13 @@ async def test_pause_resume_same_episode_two_segments_same_show_key(parts):
     assert {s.show_key for s in store.segments.values()} == {"bluey"}
 
 
-async def test_title_change_starts_new_segment(parts):
+async def test_next_episode_right_after_continues_the_same_row(parts):
     tracker, store = parts
     await tracker.async_handle_state(TV, state("playing", **bluey(1)), at(0))
     await tracker.async_handle_state(TV, state("playing", **bluey(2)), at(300))
     await tracker.async_handle_state(TV, state("paused", **bluey(2)), at(600))
-    assert seconds(store) == [300, 300]
-    assert sorted(s.episode for s in store.segments.values()) == [1, 2]
+    assert seconds(store) == [600]
+    assert next(iter(store.segments.values())).episode == 2  # the row shows where the viewing got to
 
 
 async def test_segment_under_15s_dropped(parts):
@@ -249,13 +249,13 @@ async def test_crave_series_and_episode_are_read_from_the_title(parts):
     assert (seg.series, seg.season, seg.episode, seg.show_key) == ("Friends", 1, 5, "friends")
 
 
-async def test_next_episode_of_the_same_show_starts_a_new_segment_under_one_show(parts):
+async def test_consecutive_episodes_of_one_show_are_one_row_under_one_show(parts):
     tracker, store = parts
     ep1, ep2 = dict(DISNEY), dict(DISNEY, media_artist="S1:E22 Come On", media_content_id="x2")
     await tracker.async_handle_state(TV, state("playing", **ep1), at(0))
     await tracker.async_handle_state(TV, state("playing", **ep2), at(300))
     await tracker.async_handle_state(TV, state("paused", **ep2), at(600))
-    assert sorted((s.episode, s.seconds) for s in store.segments.values()) == [(21, 300), (22, 300)]
+    assert [(s.episode, s.seconds) for s in store.segments.values()] == [(22, 600)]
     assert {s.show_key for s in store.segments.values()} == {"how i met your mother"}
 
 
@@ -268,3 +268,50 @@ async def test_a_movie_and_an_app_with_no_details_keep_working(parts):
 async def test_netflix_reports_only_the_app_so_it_is_tracked_at_app_level(parts):
     seg = await watched(parts, NETFLIX)
     assert seg.show_key == "app:com.netflix.netflix" and seg.series is None and seg.duration_total is None
+
+
+async def run(tracker, steps):
+    for t, value, attrs in steps:
+        await tracker.async_handle_state(TV, state(value, **attrs), at(t))
+
+
+async def test_a_brief_glitch_to_another_app_does_not_split_a_viewing(parts):
+    tracker, store = parts
+    await run(tracker, [(0, "playing", NETFLIX), (300, "paused", CRAVE), (306, "playing", NETFLIX), (520, "paused", CRAVE)])
+    assert len(store.segments) == 1
+    seg = next(iter(store.segments.values()))
+    assert (seg.app_name, seg.seconds) == ("Netflix", 520)  # the 6 s glitch is part of the same viewing
+
+
+async def test_autoplay_to_the_next_episode_is_one_viewing(parts):
+    tracker, store = parts
+    ep14 = dict(DISNEY, media_artist="S1:E14 Say Cheese")
+    await run(tracker, [(0, "playing", DISNEY), (205, "idle", dict(app_id="com.disney.disneyplus", app_name="Disney+")),
+                        (206, "playing", ep14), (410, "paused", ep14)])
+    assert seconds(store) == [410] and next(iter(store.segments.values())).episode == 14
+
+
+async def test_a_break_longer_than_30_seconds_starts_a_new_row(parts):
+    tracker, store = parts
+    await run(tracker, [(0, "playing", NETFLIX), (300, "paused", NETFLIX), (360, "playing", NETFLIX), (600, "paused", NETFLIX)])
+    assert seconds(store) == [240, 300]
+
+
+async def test_a_short_pause_is_part_of_the_same_viewing(parts):
+    tracker, store = parts
+    await run(tracker, [(0, "playing", NETFLIX), (300, "paused", NETFLIX), (320, "playing", NETFLIX), (600, "paused", NETFLIX)])
+    assert seconds(store) == [600]
+
+
+async def test_a_different_app_after_a_short_gap_is_a_new_row(parts):
+    tracker, store = parts
+    await run(tracker, [(0, "playing", NETFLIX), (300, "paused", NETFLIX), (310, "playing", DISNEY), (610, "paused", DISNEY)])
+    assert len(store.segments) == 2
+
+
+async def test_a_deleted_row_is_not_brought_back_by_resuming(parts):
+    tracker, store = parts
+    await run(tracker, [(0, "playing", NETFLIX), (300, "paused", NETFLIX)])
+    store.delete_segment(next(iter(store.segments)))
+    await run(tracker, [(310, "playing", NETFLIX), (610, "paused", NETFLIX)])
+    assert seconds(store) == [300]  # only the part after the delete
