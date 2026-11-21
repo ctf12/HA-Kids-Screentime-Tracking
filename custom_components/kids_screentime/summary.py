@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta, tzinfo
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import Any
 
 from .models import Segment, Verdict
@@ -14,14 +14,15 @@ def _minutes(seconds: float) -> int:
 
 
 def split_by_day(seg: Segment, tz: tzinfo) -> dict[date, float]:
-    """Seconds of a segment that fall on each local calendar day."""
-    start, end = seg.start.astimezone(tz), seg.end.astimezone(tz)
+    """Seconds of a segment that fall on each local calendar day (arithmetic in UTC, so DST can't skew it)."""
+    start, end = seg.start.astimezone(timezone.utc), seg.end.astimezone(timezone.utc)
     out: dict[date, float] = {}
     cursor = start
     while cursor < end:
-        next_midnight = datetime.combine(cursor.date() + timedelta(days=1), time.min, tzinfo=tz)
+        local = cursor.astimezone(tz)
+        next_midnight = datetime.combine(local.date() + timedelta(days=1), time.min, tzinfo=tz).astimezone(timezone.utc)
         stop = min(end, next_midnight)
-        out[cursor.date()] = out.get(cursor.date(), 0.0) + (stop - cursor).total_seconds()
+        out[local.date()] = out.get(local.date(), 0.0) + (stop - cursor).total_seconds()
         cursor = stop
     return out
 

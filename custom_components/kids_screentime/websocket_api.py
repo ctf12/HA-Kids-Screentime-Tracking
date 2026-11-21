@@ -8,6 +8,7 @@ from homeassistant.components import websocket_api as ha_ws
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, SIGNAL_UPDATED
@@ -189,7 +190,7 @@ def async_register_services(hass: HomeAssistant) -> None:
     for name, handler, schema in (
         ("delete_session", delete_session, {vol.Required("session_id"): str}),
         ("delete_show", delete_show, {vol.Required("key"): str}),
-        ("set_show_rule", set_show_rule, {vol.Required("key"): str, vol.Required("rule"): RULE}),
+        ("set_show_rule", set_show_rule, {vol.Required("key"): str, vol.Optional("rule", default=None): RULE}),
         ("resolve_review", resolve_review, {vol.Required("key"): str, vol.Required("count"): bool}),
     ):
-        hass.services.async_register(DOMAIN, name, handler, schema=vol.Schema(schema))
+        async_register_admin_service(hass, DOMAIN, name, handler, schema=vol.Schema(schema))

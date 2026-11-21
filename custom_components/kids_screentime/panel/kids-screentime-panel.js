@@ -49,7 +49,12 @@ class KidsScreentimePanel extends HTMLElement {
     this._hass = hass;
     if (first) this._load();
   }
-  set narrow(_) {}
+  set narrow(value) {
+    if (this._narrow !== value) {
+      this._narrow = value;
+      if (this._hass) this._render();
+    }
+  }
   set panel(_) {}
 
   async _ws(type, extra = {}) {
@@ -70,12 +75,17 @@ class KidsScreentimePanel extends HTMLElement {
   }
 
   async _do(type, extra) {
+    let failed = null;
     try {
       await this._ws(type, extra);
     } catch (err) {
-      this._error = err.message || "That change failed";
+      failed = err.message || "That change failed";
     }
     await this._load();
+    if (failed) {
+      this._error = failed; // _load() clears errors on success, so show the failure after it
+      this._render();
+    }
   }
 
   _when(iso) {
@@ -122,12 +132,20 @@ class KidsScreentimePanel extends HTMLElement {
         h("button", { class: "act danger", onclick: () => this._do("resolve_review", { key: s.key, count: false }) }, "Don't count")));
   }
 
+  _menuButton() {
+    // On a narrow screen the sidebar is closed, so the panel must offer the button that opens it.
+    const menu = document.createElement("ha-menu-button");
+    menu.hass = this._hass;
+    menu.narrow = this._narrow;
+    return menu;
+  }
+
   _render() {
     const tabs = [["log", "Log"], ["shows", "Shows"], ["review", `Needs review${this._data.review.length ? ` (${this._data.review.length})` : ""}`]];
     const body = { log: () => this._logRows(), shows: () => this._showRows(), review: () => this._reviewRows() }[this._tab]();
     this.shadowRoot.replaceChildren(
       h("style", {}, STYLE),
-      h("header", {}, h("h1", {}, "Kids Screentime"), h("button", { onclick: () => this._load() }, "Refresh")),
+      h("header", {}, this._menuButton(), h("h1", {}, "Kids Screentime"), h("button", { onclick: () => this._load() }, "Refresh")),
       h("nav", { role: "tablist" }, tabs.map(([id, label]) =>
         h("button", { role: "tab", "aria-selected": String(this._tab === id), onclick: () => { this._tab = id; this._render(); } }, label))),
       h("main", {}, this._error ? h("div", { class: "empty" }, this._error) : null, body));

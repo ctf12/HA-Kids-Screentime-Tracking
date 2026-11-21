@@ -51,14 +51,21 @@ class _Open:
     duration_total: float | None = None
 
 
+def _number(value: Any) -> float | None:
+    try:
+        return None if value is None else float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _estimate_position(attrs: dict[str, Any], now: datetime) -> float | None:
-    position = attrs.get(ATTR_POSITION)
+    position = _number(attrs.get(ATTR_POSITION))
     if position is None:
         return None
     updated = attrs.get(ATTR_POSITION_AT)
     if isinstance(updated, datetime):
-        return float(position) + max(0.0, (now - updated).total_seconds())
-    return float(position)
+        return position + max(0.0, (now - updated).total_seconds())
+    return position
 
 
 class SessionTracker:
@@ -88,7 +95,7 @@ class SessionTracker:
             item=(app_id, title, series, a.get(ATTR_SEASON), a.get(ATTR_EPISODE)),
             start=dt_util.utcnow(), app_id=app_id, app_name=a.get(ATTR_APP_NAME), title=title,
             series=series, season=a.get(ATTR_SEASON), episode=a.get(ATTR_EPISODE),
-            media_type=str(content_type or "video").lower(), duration_total=a.get(ATTR_DURATION),
+            media_type=str(content_type or "video").lower(), duration_total=_number(a.get(ATTR_DURATION)),
         )
 
     async def async_handle_state(self, entity_id: str, new: State | None, now: datetime) -> None:
@@ -106,8 +113,9 @@ class SessionTracker:
             position = _estimate_position(new.attributes, now)
             if position is not None:
                 current.position_max = max(current.position_max or 0.0, position)
-            if new.attributes.get(ATTR_DURATION) is not None:
-                current.duration_total = new.attributes[ATTR_DURATION]
+            duration = _number(new.attributes.get(ATTR_DURATION))
+            if duration is not None:
+                current.duration_total = duration
         if closing is not None:
             await self._emit(closing, now)
 

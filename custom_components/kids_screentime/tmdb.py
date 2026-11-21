@@ -10,6 +10,7 @@ from .models import show_key
 
 BASE_URL = "https://api.themoviedb.org/3"
 KIDS_GENRE_ID = 10762
+REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
 class TmdbError(Exception):
@@ -32,7 +33,7 @@ class TmdbClient:
     async def _get(self, path: str, **params: Any) -> dict[str, Any]:
         try:
             async with self._session.get(
-                f"{BASE_URL}/{path}", params={"api_key": self._key, **params}
+                f"{BASE_URL}/{path}", params={"api_key": self._key, **params}, timeout=REQUEST_TIMEOUT
             ) as resp:
                 if resp.status != 200:
                     raise TmdbError(f"TMDB {path} returned {resp.status}")

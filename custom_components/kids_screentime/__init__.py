@@ -7,8 +7,8 @@ from zoneinfo import ZoneInfo
 from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import EVENT_CORE_CONFIG_UPDATE, Platform
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
@@ -60,6 +60,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         websocket_api.async_register(hass)
         websocket_api.async_register_services(hass)
         domain_data["registered"] = True
+    @callback
+    def _core_config_updated(event: Event) -> None:
+        if "time_zone" in event.data:
+            hass.config_entries.async_schedule_reload(entry.entry_id)  # re-read the zone for day and week totals
+
+    entry.async_on_unload(hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _core_config_updated))
     await _register_panel(hass, domain_data)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(tracker.async_start())

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from datetime import datetime
 
 from homeassistant.util import dt as dt_util
@@ -10,6 +11,8 @@ from .classifier import classify
 from .models import Show, Verdict
 from .store import ScreentimeStore
 from .tmdb import Lookup, TmdbClient, TmdbError
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ShowResolver:
@@ -20,6 +23,10 @@ class ShowResolver:
         self._store = store
         self._tmdb = tmdb
 
+    @property
+    def has_tmdb(self) -> bool:
+        return self._tmdb is not None
+
     async def resolve(
         self, *, key: str, title: str, media_type: str, app_name: str | None,
         now: datetime | None = None,
@@ -28,12 +35,14 @@ class ShowResolver:
         show = self._store.shows.get(key)
         if show is None or show.lookup_failed:
             lookup, failed = await self._lookup(key, title, media_type)
+            current = self._store.shows.get(key)  # may have been decided by hand while we waited
+            manual = current is not None and current.source == "manual"
             show = Show(
                 key=key, title=title,
                 rating=lookup.rating if lookup else None,
                 tmdb_id=lookup.tmdb_id if lookup else None,
                 kids_genre=lookup.kids_genre if lookup else False,
-                verdict=Verdict.REVIEW, source="auto", lookup_failed=failed,
+                verdict=Verdict.REVIEW, source="manual" if manual else "auto", lookup_failed=failed,
                 first_seen=show.first_seen if show else now, last_seen=now,
                 exact=lookup.exact if lookup else True,
             )
@@ -74,7 +83,8 @@ class ShowResolver:
             return (Lookup(**cached) if cached is not None else None), False
         try:
             found = await self._tmdb.lookup(title, kind)  # type: ignore[union-attr,arg-type]
-        except TmdbError:
+        except TmdbError as err:
+            _LOGGER.warning("TMDB lookup failed: %s", err)  # never log the title
             return None, True
         self._store.lookups[cache_key] = (
             None if found is None else {

@@ -37,10 +37,13 @@ async def _validate(hass, user_input: dict[str, Any]) -> dict[str, str]:
     return {}
 
 
-def _clean(user_input: dict[str, Any]) -> dict[str, Any]:
+def _clean(user_input: dict[str, Any], *, keep_empty_key: bool = False) -> dict[str, Any]:
     data = {**user_input, CONF_WEEK_START: int(user_input[CONF_WEEK_START])}
     if not data.get(CONF_TMDB_KEY):
-        data.pop(CONF_TMDB_KEY, None)
+        if keep_empty_key:
+            data[CONF_TMDB_KEY] = ""  # an explicit empty value in options overrides the key stored at setup
+        else:
+            data.pop(CONF_TMDB_KEY, None)
     return data
 
 
@@ -71,6 +74,6 @@ class KidsScreentimeOptionsFlow(OptionsFlowWithReload):
         if user_input is not None:
             errors = await _validate(self.hass, user_input)
             if not errors:
-                return self.async_create_entry(data=_clean(user_input))
+                return self.async_create_entry(data=_clean(user_input, keep_empty_key=True))
         current = {**self.config_entry.data, **self.config_entry.options}
         return self.async_show_form(step_id="init", data_schema=_schema(user_input or current), errors=errors)
