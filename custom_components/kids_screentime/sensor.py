@@ -8,6 +8,7 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.const import UnitOfTime
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
@@ -27,6 +28,7 @@ class _Base(SensorEntity):
     def __init__(self, store: ScreentimeStore, entry_id: str) -> None:
         self._store = store
         self._attr_unique_id = f"{entry_id}_{self._key}"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, entry_id)}, name="Kids Screentime")
 
     async def async_added_to_hass(self) -> None:
         @callback
