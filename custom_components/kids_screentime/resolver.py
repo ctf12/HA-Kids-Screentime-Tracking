@@ -1,13 +1,13 @@
 """Turn a title into a Show with a verdict, using TMDB, the cache and the rules."""
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime
-from typing import Any
 
 from homeassistant.util import dt as dt_util
 
 from .classifier import classify
-from .models import Show
+from .models import Show, Verdict
 from .store import ScreentimeStore
 from .tmdb import Lookup, TmdbClient, TmdbError
 
@@ -39,6 +39,8 @@ class ShowResolver:
             kids_genre=show.kids_genre, rules=self._store.rules,
         )
         show.last_seen = now
+        if show.verdict == Verdict.DISCARD and key not in self._store.rules.never and key not in self._store.shows:
+            return show  # adult viewing leaves no readable trace
         self._store.upsert_show(show)
         return show
 
@@ -47,7 +49,7 @@ class ShowResolver:
             return None, False
         kinds = {"tvshow": ["tv"], "movie": ["movie"]}.get(media_type, ["tv", "movie"])
         for kind in kinds:
-            cache_key = f"{kind}:{key}"
+            cache_key = hashlib.sha256(f"{kind}:{key}".encode()).hexdigest()[:16]
             if cache_key in self._store.lookups:
                 cached = self._store.lookups[cache_key]
                 if cached is not None:

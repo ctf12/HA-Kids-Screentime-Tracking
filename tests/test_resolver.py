@@ -66,3 +66,15 @@ async def test_manual_never_beats_rating(store):
     await resolve(resolver)
     store.set_rule("bluey", "never")
     assert (await resolve(resolver)).verdict == Verdict.DISCARD
+
+
+async def test_discarded_adult_title_leaves_no_trace(store):
+    tmdb = FakeTmdb({"gritty drama": Lookup(9, "TV-MA", False)})
+    resolver = ShowResolver(store, tmdb)
+    shown = await resolve(resolver, key="gritty drama", title="Gritty Drama", app="Netflix")
+    assert shown.verdict == Verdict.DISCARD
+    assert "gritty drama" not in store.shows
+    assert not any("gritty" in k for k in store.lookups)
+    again = await resolve(resolver, key="gritty drama", title="Gritty Drama", app="Netflix")
+    assert again.verdict == Verdict.DISCARD
+    assert tmdb.calls == 1  # still cached, just not readable

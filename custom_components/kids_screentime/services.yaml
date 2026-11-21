@@ -1,0 +1,27 @@
+delete_session:
+  fields:
+    session_id:
+      required: true
+      selector: {text: {}}
+delete_show:
+  fields:
+    key:
+      required: true
+      selector: {text: {}}
+set_show_rule:
+  fields:
+    key:
+      required: true
+      selector: {text: {}}
+    rule:
+      selector:
+        select:
+          options: [always, never]
+resolve_review:
+  fields:
+    key:
+      required: true
+      selector: {text: {}}
+    count:
+      required: true
+      selector: {boolean: {}}
